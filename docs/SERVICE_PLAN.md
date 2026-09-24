@@ -26,6 +26,12 @@
 5. FAQ — 도입 전 질문
 6. Contact CTA — 상담 전환
 
+### 메뉴 구조
+- AX Ground 로고 → Home
+- 상단 메뉴 → Services / Process / AI Diagnosis / FAQ
+- 무료 진단 CTA → AI Diagnosis
+- Contact CTA는 페이지 하단 상담 안내 섹션이며 별도 상담 예약 기능은 제공하지 않는다.
+
 ## 5. AI 기능
 ### 기능명
 3분 AX 간이진단
@@ -43,13 +49,19 @@
 3. 2주 액션
 4. 추천 상담 영역
 
+### 사용자 가치
+- 여러 AX 선택지 중 조직 상황에 맞는 첫 우선순위를 빠르게 파악한다.
+- 입력 내용에 근거한 2주 이내의 작은 실행 과제를 얻어 내부 논의를 시작한다.
+- 추천 영역이 AI 교육, 업무 자동화, AX 전략·PoC 중 어디에 가까운지 이해한다.
+
 ### 실패 처리
 - 필수값 누락: 프론트 검증
 - 고민 10자 미만: 프론트/백엔드 검증
 - 서버 입력 오류: 400
 - API 키 미설정: 503
 - AI 공급자 오류: 502
-- 20초 이상 지연: AbortController로 요청 중단
+- OpenAI 클라이언트 제한 시간: 15초
+- 브라우저 요청이 20초를 넘김: AbortController로 중단하고 지연 안내 표시
 
 ## 6. UX/UI 방향
 - B2B SaaS와 컨설팅 회사의 신뢰감을 결합
@@ -72,6 +84,12 @@
 - 모션 그래픽
 - 오류/타임아웃 처리
 - README / 기획서 / 제출 체크리스트
+
+### 기술 스택
+- Frontend: HTML5, CSS3, Vanilla JavaScript
+- Backend: Python Vercel Function (`api/consult.py`)
+- AI: OpenAI Responses API의 Structured Outputs(JSON Schema)
+- Hosting/Deployment: GitHub, Vercel
 
 ### 제외
 - 회원가입
