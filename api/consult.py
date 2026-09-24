@@ -118,7 +118,9 @@ class handler(BaseHTTPRequestHandler):
                 for sensitive_value in (api_key, model):
                     if sensitive_value:
                         error_message = error_message.replace(sensitive_value, "[REDACTED]")
-                error_message = re.sub(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{8,}\b", "[REDACTED]", error_message)
+                # Provider errors may return a partially masked key (for example,
+                # ``sk-...****tail``), which won't match the original api_key.
+                error_message = re.sub(r"\bsk-[A-Za-z0-9_.*=-]+", "[REDACTED]", error_message)
                 print(f"[AX Ground API Error] {type(error).__name__}: {error_message}", flush=True)
                 return json_response(self, 502, {"error": "AI 진단 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."})
 
