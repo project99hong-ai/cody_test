@@ -1,8 +1,18 @@
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler
 
 from openai import OpenAI
+
+
+DIAGNOSIS_FIELDS = ("summary", "priority", "action", "recommendation")
+DIAGNOSIS_SCHEMA = {
+    "type": "object",
+    "properties": {field: {"type": "string"} for field in DIAGNOSIS_FIELDS},
+    "required": list(DIAGNOSIS_FIELDS),
+    "additionalProperties": False,
+}
 
 
 def json_response(handler, status, payload):
@@ -21,9 +31,12 @@ def clean(value, limit=700):
 
 
 class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        return json_response(self, 200, {"status": "ok", "service": "ax-diagnosis"})
+
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Allow", "POST, OPTIONS")
+        self.send_header("Allow", "GET, POST, OPTIONS")
         self.end_headers()
 
     def do_POST(self):
@@ -32,7 +45,14 @@ class handler(BaseHTTPRequestHandler):
             if length <= 0 or length > 12000:
                 return json_response(self, 400, {"error": "올바른 입력을 보내주세요."})
 
-            data = json.loads(self.rfile.read(length).decode("utf-8"))
+            try:
+                data = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return json_response(self, 400, {"error": "입력 형식을 확인해주세요."})
+
+            if not isinstance(data, dict):
+                return json_response(self, 400, {"error": "입력 형식을 확인해주세요."})
+
             company_size = clean(data.get("companySize"), 60)
             role = clean(data.get("role"), 60)
             goal = clean(data.get("goal"), 100)
@@ -48,8 +68,7 @@ class handler(BaseHTTPRequestHandler):
             if not api_key:
                 return json_response(self, 503, {"error": "서버에 AI API 키가 아직 설정되지 않았습니다."})
 
-            client = OpenAI(api_key=api_key)
-            model = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+            model = (os.environ.get("OPENAI_MODEL") or "").strip() or "gpt-5-mini"
             prompt = f"""
 당신은 기업의 AI/AX 전환을 돕는 실무형 컨설턴트입니다.
 사용자가 입력한 정보만을 근거로, 과장 없이 실행 가능한 1차 진단을 작성하세요.
@@ -71,22 +90,39 @@ class handler(BaseHTTPRequestHandler):
 }}
 """
 
-            response = client.responses.create(
-                model=model,
-                input=prompt,
-            )
-            raw = (response.output_text or "").strip()
-            if raw.startswith("```"):
-                raw = raw.strip("`").replace("json\n", "", 1).strip()
-            result = json.loads(raw)
+            try:
+                client = OpenAI(api_key=api_key, timeout=15.0)
+                response = client.responses.create(
+                    model=model,
+                    input=prompt,
+                    text={
+                        "format": {
+                            "type": "json_schema",
+                            "name": "ax_diagnosis",
+                            "strict": True,
+                            "schema": DIAGNOSIS_SCHEMA,
+                        }
+                    },
+                )
+                result = json.loads(response.output_text or "")
 
-            required = ["summary", "priority", "action", "recommendation"]
-            if not all(isinstance(result.get(key), str) and result[key].strip() for key in required):
-                raise ValueError("Unexpected AI response shape")
+                if not isinstance(result, dict) or set(result) != set(DIAGNOSIS_FIELDS):
+                    raise ValueError("Unexpected OpenAI response shape")
+                if not all(isinstance(result[field], str) and result[field].strip() for field in DIAGNOSIS_FIELDS):
+                    raise ValueError("Unexpected OpenAI response shape")
 
-            return json_response(self, 200, {key: result[key].strip() for key in required})
+                return json_response(self, 200, {field: result[field].strip() for field in DIAGNOSIS_FIELDS})
 
-        except json.JSONDecodeError:
-            return json_response(self, 400, {"error": "입력 형식을 확인해주세요."})
+            except Exception as error:
+                error_message = str(error)
+                for sensitive_value in (api_key, model):
+                    if sensitive_value:
+                        error_message = error_message.replace(sensitive_value, "[REDACTED]")
+                error_message = re.sub(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{8,}\b", "[REDACTED]", error_message)
+                print(f"[AX Ground API Error] {type(error).__name__}: {error_message}", flush=True)
+                return json_response(self, 502, {"error": "AI 진단 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."})
+
+        except ValueError:
+            return json_response(self, 400, {"error": "요청 형식을 확인해주세요."})
         except Exception:
-            return json_response(self, 502, {"error": "AI 진단 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."})
+            return json_response(self, 500, {"error": "요청을 처리하지 못했습니다."})
